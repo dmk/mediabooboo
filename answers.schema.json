@@ -1,0 +1,146 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "mediabooboo deployment answers",
+  "type": "object",
+  "required": ["stack", "host", "paths", "enable", "reverse_proxy"],
+  "additionalProperties": false,
+  "properties": {
+    "stack": {
+      "type": "object",
+      "required": ["name"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$",
+          "maxLength": 63,
+          "description": "Compose project name, generated container-name prefix, and host label, e.g. mystack. Use lowercase letters, digits, and dashes; start and end with a letter or digit."
+        }
+      }
+    },
+    "host": {
+      "type": "object",
+      "required": ["os", "lan_ip", "puid", "pgid"],
+      "additionalProperties": false,
+      "properties": {
+        "os": {
+          "enum": ["macos", "linux"],
+          "description": "Host operating system. Affects pmset, hardware-accel codec, file-perm conventions."
+        },
+        "lan_ip": {
+          "type": "string",
+          "format": "ipv4",
+          "description": "Host LAN IP. Used for Plex advertise URL, Pi-hole rewrites, Beszel hub URL."
+        },
+        "puid": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "UID containers should run as for media file ownership."
+        },
+        "pgid": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "GID containers should run as."
+        }
+      }
+    },
+    "paths": {
+      "type": "object",
+      "required": ["deployment", "library"],
+      "additionalProperties": false,
+      "properties": {
+        "deployment": {
+          "type": "string",
+          "pattern": "^/",
+          "description": "Absolute path where compose.yaml + per-service config dirs live."
+        },
+        "library": {
+          "type": "string",
+          "pattern": "^/",
+          "description": "Absolute path to the media library root, containing movies/, series/, music/, downloads/."
+        }
+      }
+    },
+    "enable": {
+      "type": "array",
+      "uniqueItems": true,
+      "description": "Components included in the deployment.",
+      "items": {
+        "enum": [
+          "plex",
+          "jellyfin",
+          "sonarr",
+          "radarr",
+          "prowlarr",
+          "transmission",
+          "jellyseerr",
+          "flaresolverr",
+          "pihole",
+          "tailscale",
+          "beszel",
+          "library"
+        ]
+      }
+    },
+    "reverse_proxy": {
+      "type": "object",
+      "required": ["mode"],
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "enum": ["internal-tld", "real-domain", "localhost-only"],
+          "description": "How services are reached. internal-tld = *.<tld> via Pi-hole rewrites + Caddy; real-domain = ACME via Caddy; localhost-only = published ports, no proxy."
+        },
+        "tld": {
+          "type": "string",
+          "description": "Internal TLD (e.g. 'internal'). Required for mode=internal-tld."
+        },
+        "domain": {
+          "type": "string",
+          "description": "Public domain (e.g. media.example.com). Required for mode=real-domain."
+        },
+        "acme_email": {
+          "type": "string",
+          "format": "email",
+          "description": "Email for Let's Encrypt registration. Required for mode=real-domain."
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "mode": { "const": "internal-tld" } } },
+          "then": { "required": ["tld"] }
+        },
+        {
+          "if": { "properties": { "mode": { "const": "real-domain" } } },
+          "then": { "required": ["domain", "acme_email"] }
+        }
+      ]
+    },
+    "manual_overrides": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string" },
+      "description": "Files the agent must not overwrite on regenerate. Paths relative to the deployment dir. Only present when the user has hand-edited a generated file."
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "reverse_proxy": {
+            "properties": {
+              "mode": { "const": "internal-tld" }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "enable": {
+            "contains": { "const": "pihole" }
+          }
+        }
+      }
+    }
+  ]
+}

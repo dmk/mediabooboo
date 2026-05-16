@@ -1,0 +1,65 @@
+# Reference Caddyfile for reverse_proxy.mode = internal-tld.
+# Agent emits the user's Caddyfile with blocks only for enabled services and
+# substitutes the chosen TLD (default: internal).
+#
+# For mode = real-domain: replace http:// blocks with the real hostname (no scheme),
+# add `tls {email}` in the global block, drop the port-80 reliance.
+# For mode = localhost-only: omit caddy entirely; reach services on their published ports.
+
+{
+	email you@example.com   # only used for real-domain (ACME)
+}
+
+(lan) {
+	encode zstd gzip
+}
+
+http://jellyfin.internal {
+	import lan
+	reverse_proxy jellyfin:8096
+}
+
+http://plex.internal {
+	import lan
+	reverse_proxy plex:32400
+}
+
+http://pihole.internal {
+	import lan
+	reverse_proxy pihole:80
+}
+
+http://beszel.internal {
+	import lan
+	reverse_proxy beszel:8090
+}
+
+http://transmission.internal {
+	import lan
+	reverse_proxy transmission:9091
+}
+
+http://radarr.internal {
+	import lan
+	reverse_proxy radarr:7878
+}
+
+http://sonarr.internal {
+	import lan
+	reverse_proxy sonarr:8989
+}
+
+http://prowlarr.internal {
+	import lan
+	reverse_proxy prowlarr:9696
+}
+
+http://flaresolverr.internal {
+	import lan
+	reverse_proxy flaresolverr:8191
+}
+
+http://jellyseerr.internal {
+	import lan
+	reverse_proxy jellyseerr:5055
+}

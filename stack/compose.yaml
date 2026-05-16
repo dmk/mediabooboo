@@ -1,0 +1,239 @@
+# Reference compose stack. Read for shape; emit user-tailored version per CLAUDE.md.
+# Container names use `${STACK_NAME:-mediabooboo}-` as a placeholder prefix — agent rewrites to `stack.name`.
+# Paths reference ${LIBRARY_ROOT}; bind-mount targets are the container conventions each image expects.
+
+name: "${STACK_NAME:-mediabooboo}"
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "3"
+
+networks:
+  edge:
+    driver: bridge
+
+services:
+
+  # --- reverse proxy ---
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: "${STACK_NAME:-mediabooboo}-caddy"
+    restart: unless-stopped
+    logging: *default-logging
+    networks: [edge]
+    ports:
+      - "80:80/tcp"
+      - "443:443/tcp"   # only needed for reverse_proxy.mode = real-domain
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./caddy/data:/data
+      - ./caddy/config:/config
+
+  # --- DNS + ad blocking (LAN only) ---
+
+  pihole:
+    image: pihole/pihole:latest
+    container_name: "${STACK_NAME:-mediabooboo}-pihole"
+    restart: unless-stopped
+    logging: *default-logging
+    networks: [edge]
+    ports:
+      - "53:53/tcp"
+      - "53:53/udp"
+      - "3000:80/tcp"   # admin UI; reverse-proxied by caddy when enabled
+    volumes:
+      - ./pihole/etc-pihole:/etc/pihole
+    environment:
+      - TZ=${TZ:-UTC}
+      - FTLCONF_webserver_api_password=${PIHOLE_PASSWORD}
+      - FTLCONF_dns_listeningMode=ALL
+      - FTLCONF_dns_upstreams=${PIHOLE_UPSTREAMS:-1.1.1.1;9.9.9.9}
+      - FTLCONF_misc_dnsmasq_lines=address=/${INTERNAL_TLD:-internal}/${HOST_LAN_IP}
+
+  # --- media servers ---
+
+  jellyfin:
+    image: jellyfin/jellyfin:latest
+    container_name: "${STACK_NAME:-mediabooboo}-jellyfin"
+    restart: unless-stopped
+    logging: *default-logging
+    networks: [edge]
+    user: "${PUID:-1000}:${PGID:-1000}"
+    ports:
+      - "8096:8096/tcp"
+      - "7359:7359/udp"
+    volumes:
+      - ./jellyfin/config:/config
+      - ${LIBRARY_ROOT}/movies:/media/movies:ro
+      - ${LIBRARY_ROOT}/series:/media/series:ro
+    tmpfs:
+      - /cache:size=${JELLYFIN_CACHE_SIZE:-8g},mode=1777
+    environment:
+      - JELLYFIN_PublishedServerUrl=${JELLYFIN_PUBLIC_URL:-http://localhost:8096}
+      - JELLYFIN_CACHE_DIR=/cache
+      - TZ=${TZ:-UTC}
+
+  plex:
+    image: lscr.io/linuxserver/plex:latest
+    container_name: "${STACK_NAME:-mediabooboo}-plex"
+    hostname: "${STACK_NAME:-mediabooboo}-plex"
+    restart: unless-stopped
+    logging: *default-logging
+    networks: [edge]
+    ports:
+      - "32400:32400/tcp"
+      - "32410:32410/udp"
+      - "32412:32412/udp"
+      - "32413:32413/udp"
+      - "32414:32414/udp"
+    volumes:
+      - ./plex/config:/config
+      - ${LIBRARY_ROOT}/movies:/movies:ro
+      - ${LIBRARY_ROOT}/series:/series:ro
+      - ${LIBRARY_ROOT}/music:/music:ro
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-UTC}
+      - VERSION=docker
+      - PLEX_CLAIM=${PLEX_CLAIM:-}              # one-shot claim token from plex.tv/claim
+      - ADVERTISE_IP=http://${HOST_LAN_IP}:32400/
+
+  # --- download client + automation ---
+
+  transmission:
+    image: lscr.io/linuxserver/transmission:latest
+    container_name: "${STACK_NAME:-mediabooboo}-transmission"
+    restart: unless-stopped
+    logging: *default-logging
+    networks: [edge]
+    ports:
+      - "51413:51413/tcp"
+      - "51413:51413/udp"
+    volumes:
+      - ./transmission/config:/config
+      - ${LIBRARY_ROOT}/downloads:/downloads
+      - ${LIBRARY_ROOT}/downloads/watch:/watch
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-UTC}
+      - PEERPORT=51413
+      - HOST_WHITELIST=transmission.${INTERNAL_TLD:-internal},transmission,localhost,127.0.0.1
+
+  radarr:
+    image: lscr.io/linuxserver/radarr:latest
+    container_name: "${STACK_NAME:-mediabooboo}-radarr"
+    restart: unless-stopped
+    logging: *default-logging
+    networks: [edge]
+    volumes:
+      - ./radarr/config:/config
+      - ${LIBRARY_ROOT}/movies:/movies
+      - ${LIBRARY_ROOT}/downloads:/downloads
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-UTC}
+
+  sonarr:
+    image: lscr.io/linuxserver/sonarr:latest
+    container_name: "${STACK_NAME:-mediabooboo}-sonarr"
+    restart: unless-stopped
+    logging: *default-logging
+    networks: [edge]
+    volumes:
+      - ./sonarr/config:/config
+      - ${LIBRARY_ROOT}/series:/series
+      - ${LIBRARY_ROOT}/downloads:/downloads
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-UTC}
+
+  prowlarr:
+    image: lscr.io/linuxserver/prowlarr:latest
+    container_name: "${STACK_NAME:-mediabooboo}-prowlarr"
+    restart: unless-stopped
+    logging: *default-logging
+    networks: [edge]
+    volumes:
+      - ./prowlarr/config:/config
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-UTC}
+
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    container_name: "${STACK_NAME:-mediabooboo}-flaresolverr"
+    restart: unless-stopped
+    logging: *default-logging
+    networks: [edge]
+    environment:
+      - LOG_LEVEL=${FLARESOLVERR_LOG_LEVEL:-info}
+      - TZ=${TZ:-UTC}
+
+  jellyseerr:
+    image: fallenbagel/jellyseerr:latest
+    container_name: "${STACK_NAME:-mediabooboo}-jellyseerr"
+    restart: unless-stopped
+    logging: *default-logging
+    networks: [edge]
+    volumes:
+      - ./jellyseerr/config:/app/config
+    environment:
+      - LOG_LEVEL=info
+      - TZ=${TZ:-UTC}
+
+  # --- metrics ---
+
+  beszel:
+    image: henrygd/beszel:latest
+    container_name: "${STACK_NAME:-mediabooboo}-beszel"
+    restart: unless-stopped
+    logging: *default-logging
+    networks: [edge]
+    ports:
+      - "8090:8090/tcp"
+    volumes:
+      - ./beszel/data:/beszel_data
+
+  beszel-agent:
+    image: henrygd/beszel-agent:latest
+    container_name: "${STACK_NAME:-mediabooboo}-beszel-agent"
+    restart: unless-stopped
+    logging: *default-logging
+    networks: [edge]
+    ports:
+      - "45876:45876/tcp"
+    volumes:
+      - ./beszel/agent_data:/var/lib/beszel-agent
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - LISTEN=45876
+      - KEY=${BESZEL_KEY}      # paste hub-generated SSH pubkey here after pairing
+
+  # --- remote access (optional) ---
+  # Tailscale can run as a single container joining the tailnet, or as a sidecar
+  # using `network_mode: service:<svc>` to expose a specific service. Pick the
+  # shape per the user's intent; this stub is the simplest single-container case.
+  tailscale:
+    image: tailscale/tailscale:latest
+    container_name: "${STACK_NAME:-mediabooboo}-tailscale"
+    restart: unless-stopped
+    logging: *default-logging
+    network_mode: host
+    environment:
+      - TS_AUTHKEY=${TAILSCALE_AUTHKEY}
+      - TS_STATE_DIR=/var/lib/tailscale
+      - TS_HOSTNAME=${STACK_NAME:-mediabooboo}
+    volumes:
+      - ./tailscale:/var/lib/tailscale
+      - /dev/net/tun:/dev/net/tun
+    cap_add:
+      - net_admin
+      - net_raw
